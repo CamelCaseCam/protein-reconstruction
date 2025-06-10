@@ -215,7 +215,7 @@ def optimize_rotamers(
         atom_types: np.ndarray,
         element_map: Dict[str, int],
         alpha_offsets: np.ndarray,
-        rotamer_library_path: str = "training/rotamer_library.npz"
+        rotamer_library_path: str = "rotamer_library.npz"
     ) -> Structure.Structure:
     """
     Optimize the side chain rotamers of a protein structure to minimize the cost function.

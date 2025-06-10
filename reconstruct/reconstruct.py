@@ -8,7 +8,34 @@ from .assign_backbone import assign_backbone_atoms
 import PeptideBuilder
 from PeptideBuilder import Geometry
 from Bio.PDB import PDBIO, Structure, Model, Chain, Residue, Atom
-from encoder import PAD_ID, elem
+
+element_list_stripped = [
+    "H",
+    "Li",
+    "B",
+    "C",
+    "N",
+    "O",
+    "F",
+    "Na",
+    "Mg",
+    "P",
+    "S",
+    "Cl",
+    "K",
+    "Ca",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Cu",
+    "Zn",
+    "Mb",
+    "Pd",
+    "Ag",
+]
+elem = [e.upper() for e in element_list_stripped]
+PAD_ID = len(elem)
 
 
 def reconstruct_structure(
