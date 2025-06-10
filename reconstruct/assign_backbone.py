@@ -4,6 +4,11 @@ Utility for assigning likely backbone atoms from nearby frames for reconstructio
 
 import numpy as np
 from .constants import *
+from encoder import elem
+
+Carbon = elem.index('C')
+Nitrogen = elem.index('N')
+Oxygen = elem.index('O')
 
 def assign_backbone_atoms(
         alpha_carbon_envs: np.ndarray,
@@ -31,15 +36,15 @@ def assign_backbone_atoms(
             Alpha carbons are included, and coordinates are in Angstroms relative to the alpha carbon atom.
         alpha_carbon_elem_types (np.ndarray): An array of shape (L, N) representing the element types of the atoms in alpha_carbon_envs.
     Returns:
-        np.ndarray: An array of shape (L, 2, 3) containing the relative distance between CA_i-1 to CA_i and CA_i to CA_i+1 for each position i in the sequence. 
-            The first position is set to [0, 0, 0] since there is no previous alpha carbon.
+        np.ndarray: An array of shape (L, 6, 3) containing the CA_i-1 - C - N_i - CA - C - N_i+1 - CA offsets for each position i in the sequence. 
+            Any uncomputed offsets will be set to [NaN, NaN, NaN]. 
     '''
     L, N, _ = alpha_carbon_envs.shape
-    output = np.zeros((L, 2, 3), dtype=np.float32)
+    output = np.zeros((L, 6, 3), dtype=np.float32)
     # Precompute global carbon, nitrogen, and oxygen positions
-    carbons_global = alpha_carbon_envs[alpha_carbon_elem_types == 'C']
-    nitrogens_global = alpha_carbon_envs[alpha_carbon_elem_types == 'N']
-    oxygens_global = alpha_carbon_envs[alpha_carbon_elem_types == 'O']
+    carbons_global = alpha_carbon_elem_types == Carbon
+    nitrogens_global = alpha_carbon_elem_types == Nitrogen
+    oxygens_global = alpha_carbon_elem_types == Oxygen
 
     # Iterate over each frame and assign backbone atoms
     for frame_index in range(L):
@@ -73,16 +78,16 @@ def assign_frame_atoms(
         oxygens_global (np.ndarray): An array of shape (L, N, 3) representing the oxygen atoms in the alpha carbon environments.
     
     Returns:
-        np.ndarray: An array of shape (2, 3) containing the relative positions of the assigned alpha carbon atoms for the specified frame.
+        np.ndarray: An array of shape (6, 3) containing the offsets for the specified frame.
     '''
     
     is_first = frame_index == 0
     is_last = frame_index == (alpha_carbon_envs.shape[0] - 1)
 
     # Precompute indexes for carbon, nitrogen, and oxygen
-    carbons = carbons_global[frame_index]
-    nitrogens = nitrogens_global[frame_index]
-    oxygens = oxygens_global[frame_index]
+    carbons = alpha_carbon_envs[carbons_global[frame_index]]
+    nitrogens = alpha_carbon_envs[nitrogens_global[frame_index]]
+    oxygens = alpha_carbon_envs[oxygens_global[frame_index]]
 
     # To store alpha carbons
     prev_ca = None  # Previous frame's alpha carbon
@@ -101,14 +106,24 @@ def assign_frame_atoms(
     # We'll have to handle the case where there is no nitrogen later
 
     # Get all carbonyl carbons
-    carbonyl_carbons = carbons[np.linalg.norm(carbons[None, :] - oxygens[None, :], axis=2) < CARBONYL_OXYGEN_DISTANCE]
+    carbonyl_carbons = carbons[
+        np.any(
+            np.linalg.norm(carbons[:, None, :] - oxygens[None, :, :], axis=2)
+            < CARBONYL_OXYGEN_DISTANCE,
+            axis=1
+        )
+    ]
     # Exclude alpha carbon as it is likely to be included in the carbonyl carbons
-    carbonyl_carbons = carbonyl_carbons[carbonyl_carbons != ca]
+    carbonyl_carbons = carbonyl_carbons[np.all(carbonyl_carbons != ca, axis = -1)]
     # Assign this frame's carbonyl carbon
     # If it's the last frame, we need to find the carbonyl carbon that is near two oxygens
     if is_last:
         # Get carbonyl carbons with two nearby oxygens
-        num_nearby_oxygens = np.sum(np.linalg.norm(oxygens[:, None] - carbonyl_carbons[None, :], axis=2) < CARBONYL_OXYGEN_DISTANCE, axis=1)
+        num_nearby_oxygens = np.sum(
+            np.linalg.norm(carbonyl_carbons[:, None, :] - oxygens[None, :, :], axis=2)
+            < CARBONYL_OXYGEN_DISTANCE,
+            axis=1
+        )
         valid_carbonyls = carbonyl_carbons[num_nearby_oxygens >= 2]
         if valid_carbonyls.size > 0:
             carbonyl_c = valid_carbonyls[np.argmin(np.linalg.norm(valid_carbonyls - ca, axis=1))]
@@ -117,13 +132,21 @@ def assign_frame_atoms(
             carbonyl_c = carbonyl_carbons[np.argmin(np.linalg.norm(carbonyl_carbons - ca, axis=1))]
     else:
         # Get carbonyl carbons with a nearby nitrogen
-        amide_carbonyls = carbonyl_carbons[np.linalg.norm(carbonyl_carbons - n, axis=1) < MAX_AMIDE_C_DISTANCE]
+        amide_carbonyls = carbonyl_carbons[
+            np.any(
+                np.linalg.norm(carbonyl_carbons[:, None, :] - nitrogens[None, :, :], axis=2)
+                < MAX_AMIDE_C_DISTANCE,
+                axis=1
+            )
+        ]
         if amide_carbonyls.size > 0:
             carbonyl_c = amide_carbonyls[np.argmin(np.linalg.norm(amide_carbonyls - ca, axis=1))]
         else:
             # Fallback: just take the closest carbonyl carbon to the alpha carbon
             carbonyl_c = carbonyl_carbons[np.argmin(np.linalg.norm(carbonyl_carbons - ca, axis=1))]
 
+    prev_carbonyl = None  # Previous frame's carbonyl carbon
+    prev_ca = None  # Previous frame's alpha carbon
     if not is_first:
         if n is not None:
             # Get the previous frame's carbonyl carbon
@@ -134,7 +157,7 @@ def assign_frame_atoms(
             # Now, find possible alpha carbons. Score them based on distance to carbonyl carbons and proximity to closest nitrogen
             scores = np.linalg.norm(carbons - prev_carbonyl, axis=1) * CA_SCORE_CARBONYL_C + np.linalg.norm(carbons - n, axis=1) * CA_SCORE_N
             # Exclude the carbonyl carbon itself
-            scores[prev_carbonyl_index] = np.inf
+            scores[np.all(carbons == prev_carbonyl, axis = -1)] = np.inf
             # Find the best alpha carbon
             prev_ca_index = np.argmin(scores)
             prev_ca = carbons[prev_ca_index]
@@ -145,19 +168,19 @@ def assign_frame_atoms(
             # Just take the closest carbon to the alpha carbon that is near an oxygen
             if candidate_carbonyls.size > 0:
                 prev_carbonyl_index = np.argmin(np.linalg.norm(candidate_carbonyls - ca, axis=1))
-                prev_carbonyl = candidate_carbonyls[prev_ca_index]
+                prev_carbonyl = candidate_carbonyls[prev_carbonyl_index]
 
                 # Now, find possible alpha carbons. Score them based on distance to carbonyl carbons and proximity to closest nitrogen
                 scores = np.linalg.norm(carbons - prev_carbonyl, axis=1) * CA_SCORE_CARBONYL_C + np.linalg.norm(carbons - n, axis=1) * CA_SCORE_N
                 # Exclude the carbonyl carbon itself
-                scores[prev_carbonyl_index] = np.inf
+                scores[np.all(carbons == prev_carbonyl, axis = -1)] = np.inf
                 # Find the best alpha carbon
                 prev_ca_index = np.argmin(scores)
                 prev_ca = carbons[prev_ca_index]
             else:
                 # At this point, results will be garbage anyways so just return the nearest carbon to the alpha carbon
-                candidates = carbons[carbons != ca]
-                candidates = candidates[candidates != carbonyl_c]
+                candidates = carbons[np.all(carbons != ca, axis = -1)]
+                candidates = candidates[np.all(candidates != carbonyl_c, axis = -1)]
                 if candidates.size > 0:
                     prev_ca_index = np.argmin(np.linalg.norm(candidates - ca, axis=1))
                     prev_ca = candidates[prev_ca_index]
@@ -165,21 +188,35 @@ def assign_frame_atoms(
                     prev_ca = ca
 
     # Find the next frame's nitrogen
+    next_n = None  # Next frame's nitrogen
+    next_ca = None  # Next frame's alpha carbon
     if not is_last:
-        next_frame_nitrogens = nitrogens_global[frame_index + 1]
-        next_n_index = np.argmin(np.linalg.norm(next_frame_nitrogens - carbonyl_c, axis=1))
-        next_n = next_frame_nitrogens[next_n_index]
+        next_n_index = np.argmin(np.linalg.norm(nitrogens - carbonyl_c, axis=1))
+        next_n = nitrogens[next_n_index]
 
         # Get the next frame's alpha carbon
-        next_frame_carbons = carbons_global[frame_index + 1]
-        next_ca_index = np.argmin(np.linalg.norm(next_frame_carbons - next_n, axis=1))
-        next_ca = next_frame_carbons[next_ca_index]
+        next_ca_index = np.argmin(np.linalg.norm(carbons - next_n, axis=1))
+        next_ca = carbons[next_ca_index]
 
     # Now return the relative positions
-    result = np.zeros((2, 3))
-    if prev_ca is not None:
-        result[0] = prev_ca - ca  # CA_i-1 to CA_i
-    if next_ca is not None:
-        result[1] = next_ca - ca  # CA_i to CA_i+1
+    result = np.zeros((6, 3)) + np.nan  # Initialize with NaN values
+    # CA_i-1 -> C_i-1
+    if prev_ca is not None and prev_carbonyl is not None:
+        result[0] = prev_carbonyl - prev_ca
+    # C_i-1 -> N_i
+    if prev_carbonyl is not None and n is not None:
+        result[1] = n - prev_carbonyl
+    # N_i -> CA_i
+    if n is not None and ca is not None:
+        result[2] = ca - n
+    # CA_i -> C_i
+    if ca is not None and carbonyl_c is not None:
+        result[3] = carbonyl_c - ca
+    # C_i -> N_i+1
+    if carbonyl_c is not None and next_n is not None:
+        result[4] = next_n - carbonyl_c
+    # N_i+1 -> CA_i+1
+    if next_n is not None and next_ca is not None:
+        result[5] = next_ca - next_n
     return result
 

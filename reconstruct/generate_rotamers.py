@@ -1,20 +1,6 @@
-"""
-Generates representative side‑chain **rotamers** by clustering bond / angle /
-dihedral vectors extracted from PDB structures under ``training/pdbs``.
-
-Key points vs the draft you saw earlier
---------------------------------------
-* **No PeptideBuilder / copy_all_geometry** – we use a *minimal* ``SimpleGeo``
-  class that stores heavy‑atom Cartesian coordinates direct from each residue.
-* All geometric features (bond lengths, bond angles, dihedrals) are computed
-  **purely with NumPy** – see the `dist`, `angle`, and `dihedral` helpers.
-* Every `_get_*` helper is now fully implemented – nothing left as a placeholder.
-* Safe: any residue missing a required atom is silently skipped, so vectors fed
-  to K‑means never contain NaNs.
-
-Copy‑paste this whole file; it stands alone except for your existing Python
-packages (*Bio.PDB*, *NumPy*, *SciPy*, *tqdm*).
-"""
+'''
+Utility for generating and clustering representative "pseudo-rotamers" for each amino acid type. 
+'''
 
 from __future__ import annotations
 
@@ -26,11 +12,6 @@ import numpy as np
 from Bio.PDB import PDBParser, Residue
 from scipy.cluster.vq import kmeans2
 from tqdm import tqdm
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Basic linear‑algebra helpers (angles in **radians**; dihedral is signed)
-# ──────────────────────────────────────────────────────────────────────────────
-
 
 def _norm(v: np.ndarray) -> float:
     return float(np.linalg.norm(v))
@@ -62,11 +43,6 @@ def dihedral(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray, p4: np.ndarray) -> 
     return float(np.arctan2(y, x))
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Minimal container holding heavy‑atom coordinates
-# ──────────────────────────────────────────────────────────────────────────────
-
-
 class SimpleGeo:
     """A barebones replacement for ``PeptideBuilder.Geometry``"""
 
@@ -76,11 +52,6 @@ class SimpleGeo:
             for atom in residue
             if atom.element != "H"  # skip hydrogens
         }
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Constants / lookup tables
-# ──────────────────────────────────────────────────────────────────────────────
 
 THREE_LETTER_TO_SINGLE_LETTER = {
     "ALA": "A",
@@ -127,11 +98,6 @@ AMINO_NUM_COORDS: Dict[str, int] = {
     "TYR": 24,
     "TRP": 30,
 }
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Per‑residue geometry‑to‑vector helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def _get_ala(p):
@@ -469,10 +435,6 @@ def _get_trp(p):
         np.sin(dihedral(p["CD2"], p["CE2"], p["CZ2"], p["CH2"])),
     ])
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Dispatch table
-# ──────────────────────────────────────────────────────────────────────────────
-
 GET_COORD_DICT = {
     "ALA": lambda g: _get_ala(g.atoms),
     "ARG": lambda g: _get_arg(g.atoms),
@@ -494,11 +456,6 @@ GET_COORD_DICT = {
     "TYR": lambda g: _get_tyr(g.atoms),
     "VAL": lambda g: _get_val(g.atoms),
 }
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# PDB → list[SimpleGeo]
-# ──────────────────────────────────────────────────────────────────────────────
 
 def get_file_geos(file_path: str) -> Dict[str, List[SimpleGeo]]:
     parser = PDBParser(QUIET=True)
@@ -532,11 +489,6 @@ def get_all_geos(pdb_dir: str = "training/pdbs") -> Dict[str, List[SimpleGeo]]:
         for resn, lst in file_geos.items():
             geos[resn].extend(lst)
     return geos
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Vectorisation + clustering
-# ──────────────────────────────────────────────────────────────────────────────
 
 def geos_to_vector(geos: List[SimpleGeo], amino: str) -> np.ndarray:
     dim = AMINO_NUM_COORDS[amino]
