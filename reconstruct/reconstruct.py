@@ -8,7 +8,6 @@ from .assign_backbone import assign_backbone_atoms
 import PeptideBuilder
 from PeptideBuilder import Geometry
 from Bio.PDB import PDBIO, Structure, Model, Chain, Residue, Atom
-from encoder import PAD_ID, elem
 
 
 def reconstruct_structure(
@@ -20,8 +19,8 @@ def reconstruct_structure(
     Reconstructs a protein structure from noisy alpha carbon environments and their corresponding element types.
 
     1. Assign likely "nearest neighbour" backbone atoms in each frame using the algorithm defined in assign_backbone.py.
-    2. Use the neighbour alpha carbon relative positions to get backbone lengths and angles
-    3. Fit the known sequence backbone to the lengths and angles
+    2. Use the neighbour alpha carbon relative positions to get absolute positions for all alpha carbons
+    3. Fit the known sequence backbone to the alpha carbon positions
     4. Transform all atoms from all alpha carbon envs to world space. For each side chain, find the rotamer that minimizes the
         cost function. 
     5. Do local greedy optimization of the molecule where each reconstructed atom is moved to the position the nearest 
@@ -36,17 +35,10 @@ def reconstruct_structure(
     '''
     
     # 1. Assign nearest neighbour atoms to get offsets for each alpha carbon
-    offsets = assign_backbone_atoms(alpha_carbon_envs, alpha_carbon_elem_types)
+    ca_offsets = assign_backbone_atoms(alpha_carbon_envs, alpha_carbon_elem_types)
     L = len(sequence)
 
-    # 2. Get neighbour information to compute backbone angles
-    neighbour_info = integrate_neighbour_information(offsets, L)
-    # 3. Fit the known sequence backbone to the alpha carbon positions
-    geos = fit_backbone(neighbour_info, sequence)
-
-    unfit_backbone = PeptideBuilder.make_structure_from_geos(geos)
-    atom_positions, atom_types = make_atom_cloud_from_envs(alpha_carbon_envs, alpha_carbon_elem_types, unfit_backbone)
-    
+    # 2. Get absolute positions of alpha carbons (first one is at origin)
     
 def dihedral(b1, b2, b3):
     n1 = np.cross(b1, b2)
@@ -229,6 +221,8 @@ def compute_frame(
         'omega': rad2deg(omega) if omega is not None else None
     }
 
+
+
 def integrate_neighbour_information(
         offsets : np.ndarray,
         L : int
@@ -248,94 +242,29 @@ def integrate_neighbour_information(
             - phi: The phi dihedral angle.
             - psi: The psi dihedral angle.
             - omega: The omega dihedral angle.
-            - ca_im1_ca_offset: The offset vector from the alpha carbon of the previous residue to the alpha carbon of the current residue.
     '''
     output = []
     # First frame
     for frame_index in range(L):
         frame_info = compute_frame(offsets, frame_index)
         output.append(frame_info)
-    return output   
+    return output
+
+    
 
 def fit_backbone(
-        neighbour_info : np.ndarray,
+        ca_positions : np.ndarray,
         sequence : str
     ):
     '''
     Uses PeptideBuilder to fit the known sequence backbone to the alpha carbon positions.
 
     Args:
-        neighbour_info (np.ndarray): An array of dictionaries containing the neighbour information for each frame.
+        ca_positions (np.ndarray): An array of shape (L, 3) representing the absolute positions of alpha carbon atoms.
         sequence (str): The amino acid sequence of the protein, where each character corresponds to an amino acid.
     Returns:
-        list: A list of PeptideBuilder.Geometry objects representing the fitted backbone geometries for each residue in the sequence.
+        list[Geo]: A list of PeptideBuilder Geometry objects representing the backbone of the protein.
     '''
-
-    geos = []
-    for i, aa in enumerate(sequence):
-        # Get the neighbour information for this residue
-        info = neighbour_info[i]
-        # Create a Geometry object for this residue
-        geo = Geometry.geometry(aa)
-        # Set the backbone lengths and angles
-        pep_bond = info['peptide_bond']
-        pep_bond = pep_bond if pep_bond is not None else geo.peptide_bond
-        geo.peptide_bond = pep_bond
-        N_CA_C_angle = info['N_CA_C_angle']
-        N_CA_C_angle = N_CA_C_angle if N_CA_C_angle is not None else geo.N_CA_C_angle
-        geo.N_CA_C_angle = N_CA_C_angle
-        CA_N_length = info['CA_N_length']
-        CA_N_length = CA_N_length if CA_N_length is not None else geo.CA_N_length
-        geo.CA_N_length = CA_N_length
-        CA_C_length = info['CA_C_length']
-        CA_C_length = CA_C_length if CA_C_length is not None else geo.CA_C_length
-        geo.CA_C_length = CA_C_length
-        phi = info['phi']
-        phi = phi if phi is not None else geo.phi
-        geo.phi = phi
-        # Instead of psi, give psi_i-1
-        psi_im1 = geo.psi_im1
-        if i > 0:
-            psi_im1 = neighbour_info[i - 1]['psi']
-        psi_im1 = psi_im1 if psi_im1 is not None else geo.psi_im1
-        geo.psi_im1 = psi_im1
-        omega = info['omega']
-        omega = omega if omega is not None else geo.omega
-        geo.omega = omega
-        geos.append(geo)
-    return geos
+    # Create a new Structure object
+    geos = [Geometry.geometry(sequence[0])]
     
-def make_atom_cloud_from_envs(
-        alpha_carbon_envs : np.ndarray,
-        alpha_carbon_elem_types : np.ndarray,
-        unfit_backbone : PeptideBuilder.Geometry
-    ):
-    '''
-    Converts the alpha carbon environments into a point cloud of atoms in world space.
-
-    Args:
-        alpha_carbon_envs (np.ndarray): An array of shape (L, N, 3) representing all predicted atoms within 5A of each alpha carbon atom.
-        alpha_carbon_elem_types (np.ndarray): An array of shape (L, N) representing the element types of the atoms in alpha_carbon_envs.
-        unfit_backbone (PeptideBuilder.Geometry): The unfit backbone geometry to use as a reference.
-    Returns:
-        tuple: A tuple containing:
-            - positions (np.ndarray): An array of shape (M, 3) representing the positions of the atoms in world space.
-            - types (np.ndarray): An array of shape (M,) representing the element types of the atoms in the point cloud.
-    '''
-    # Placeholder for the point cloud
-    positions = []
-    types = []
-    
-    # Iterate through each frame and convert to world space
-    for i, env in enumerate(alpha_carbon_envs):
-        # The env is already relative to the alpha carbon, so we need to get the alpha carbon position and ignore pads
-        alpha_carbon_position = unfit_backbone.get_ca_coords(i)
-        non_pad_indices = np.where(alpha_carbon_elem_types[i] != PAD_ID)[0]
-        for j in non_pad_indices:
-            atom_position = env[j] + alpha_carbon_position
-            atom_type = elem[alpha_carbon_elem_types[i][j]]
-            
-            positions.append(atom_position)
-            types.append(atom_type)
-    
-    return np.array(positions), np.array(types)

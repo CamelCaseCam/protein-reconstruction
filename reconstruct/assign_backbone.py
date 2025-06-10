@@ -31,8 +31,8 @@ def assign_backbone_atoms(
             Alpha carbons are included, and coordinates are in Angstroms relative to the alpha carbon atom.
         alpha_carbon_elem_types (np.ndarray): An array of shape (L, N) representing the element types of the atoms in alpha_carbon_envs.
     Returns:
-        np.ndarray: An array of shape (L, 6, 3) containing the CA_i-1 - C - N_i - CA - C - N_i+1 - CA offsets for each position i in the sequence. 
-            Any uncomputed offsets will be set to [NaN, NaN, NaN]. 
+        np.ndarray: An array of shape (L, 2, 3) containing the relative distance between CA_i-1 to CA_i and CA_i to CA_i+1 for each position i in the sequence. 
+            The first position is set to [0, 0, 0] since there is no previous alpha carbon.
     '''
     L, N, _ = alpha_carbon_envs.shape
     output = np.zeros((L, 2, 3), dtype=np.float32)
@@ -73,7 +73,7 @@ def assign_frame_atoms(
         oxygens_global (np.ndarray): An array of shape (L, N, 3) representing the oxygen atoms in the alpha carbon environments.
     
     Returns:
-        np.ndarray: An array of shape (6, 3) containing the offsets for the specified frame.
+        np.ndarray: An array of shape (2, 3) containing the relative positions of the assigned alpha carbon atoms for the specified frame.
     '''
     
     is_first = frame_index == 0
@@ -176,24 +176,10 @@ def assign_frame_atoms(
         next_ca = next_frame_carbons[next_ca_index]
 
     # Now return the relative positions
-    result = np.zeros((6, 3)) + np.nan  # Initialize with NaN values
-    # CA_i-1 -> C_i-1
-    if prev_ca is not None and prev_carbonyl is not None:
-        result[0] = prev_carbonyl - prev_ca
-    # C_i-1 -> N_i
-    if prev_carbonyl is not None and n is not None:
-        result[1] = n - prev_carbonyl
-    # N_i -> CA_i
-    if n is not None and ca is not None:
-        result[2] = ca - n
-    # CA_i -> C_i
-    if ca is not None and carbonyl_c is not None:
-        result[3] = carbonyl_c - ca
-    # C_i -> N_i+1
-    if carbonyl_c is not None and next_n is not None:
-        result[4] = next_n - carbonyl_c
-    # N_i+1 -> CA_i+1
-    if next_n is not None and next_ca is not None:
-        result[5] = next_ca - next_n
+    result = np.zeros((2, 3))
+    if prev_ca is not None:
+        result[0] = prev_ca - ca  # CA_i-1 to CA_i
+    if next_ca is not None:
+        result[1] = next_ca - ca  # CA_i to CA_i+1
     return result
 
