@@ -4,7 +4,7 @@ Utility for assigning likely backbone atoms from nearby frames for reconstructio
 
 import numpy as np
 from .constants import *
-from encoder import elem
+from .reconstruct import elem
 
 Carbon = elem.index('C')
 Nitrogen = elem.index('N')
