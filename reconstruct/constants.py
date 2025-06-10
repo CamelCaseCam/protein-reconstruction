@@ -9,3 +9,31 @@ MAX_AMIDE_C_DISTANCE = 2.0  # Maximum distance between amide carbon and nitrogen
 
 CA_SCORE_CARBONYL_C = 0.5  # Score for carbonyl carbon in alpha carbon assignment
 CA_SCORE_N = 0.5  # Score for nitrogen in alpha carbon assignment
+
+element_list_stripped = [
+    "H",
+    "Li",
+    "B",
+    "C",
+    "N",
+    "O",
+    "F",
+    "Na",
+    "Mg",
+    "P",
+    "S",
+    "Cl",
+    "K",
+    "Ca",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Cu",
+    "Zn",
+    "Mb",
+    "Pd",
+    "Ag",
+]
+elem = [e.upper() for e in element_list_stripped]
+PAD_ID = len(elem)
