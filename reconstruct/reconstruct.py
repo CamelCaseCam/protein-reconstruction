@@ -9,6 +9,7 @@ import PeptideBuilder
 from PeptideBuilder import Geometry
 from Bio.PDB import PDBIO, Structure, Model, Chain, Residue, Atom
 from .constants import *
+from .utils import *
 
 def reconstruct_structure(
         alpha_carbon_envs : np.ndarray,
@@ -52,23 +53,11 @@ def reconstruct_structure(
     # 4. Optimize rotamers
     from .optimize_rotamers import optimize_rotamers
     element_map = {e.upper(): i for i, e in enumerate(elem)}
-    optimized_structure = optimize_rotamers(geos, atom_positions, atom_types, element_map, alpha_offsets)
+    #optimized_structure = optimize_rotamers(geos, atom_positions, atom_types, element_map, alpha_offsets)
     # Convert the optimized structure to a Bio.PDB Structure object
-    optimized_structure = PeptideBuilder.make_structure_from_geos(optimized_structure)
+    #optimized_structure = PeptideBuilder.make_structure_from_geos(optimized_structure)
     
-    return optimized_structure
-    
-    
-def dihedral(b1, b2, b3):
-    n1 = np.cross(b1, b2)
-    n2 = np.cross(b2, b3)
-    u2 = b2 / np.linalg.norm(b2)
-    x = np.dot(n1, n2)
-    y = np.dot(np.cross(n1, n2), u2)
-    return np.arctan2(y, x)
-
-def rad2deg(radians):
-    return radians * (180.0 / np.pi)
+    return unfit_backbone
 
 def compute_frame(
         ca_offsets : np.ndarray,
@@ -188,7 +177,13 @@ def compute_frame(
         CA_C_vec = CA_C_2
     
     CA_N_length = np.linalg.norm(CA_N_vec) if CA_N_vec is not None else None
+    if CA_N_length is not None and CA_N_length == 0:
+        CA_N_length = None
+        CA_N_vec = None
     CA_C_length = np.linalg.norm(CA_C_vec) if CA_C_vec is not None else None
+    if CA_C_length is not None and CA_C_length == 0:
+        CA_C_length = None
+        CA_C_vec = None
     if CA_N_vec is not None and CA_C_vec is not None:
         N_CA_C_angle = np.arccos(np.dot(CA_N_vec, CA_C_vec) / (CA_N_length * CA_C_length))
     
